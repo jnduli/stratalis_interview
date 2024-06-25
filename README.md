@@ -37,6 +37,5 @@ demo --output-file /tmp/results.csv
 3. Use threads/multiprocessing to perform extraction on multiple processes since
    a huge chunk of parsing is CPU bound.
 4. Some pages don't have the full content specified e.g. [maire de beaulieu](https://www.mon-maire.fr/maire-de-beaulieu-15), so I've chosen to default to an empty string in these instances
-5. Add unit tests for the parsing logic
 
 
