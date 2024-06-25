@@ -1,13 +1,15 @@
 import aiohttp
 import csv
-import itertools
 import logging
 import asyncio
 import re
 from bs4 import BeautifulSoup
-import requests
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
+import argparse
+
+
+MAIRE_URL = "https://www.mon-maire.fr/maires-regions"
 
 
 @dataclass
@@ -18,16 +20,16 @@ class CrawlResult:
     mayor_link: str
 
 
-MAIRE_URL = "https://www.mon-maire.fr/maires-regions"
+def set_up_logger(level: str, log_file: Optional[str] = None):
+    logging.basicConfig(filename=log_file, encoding="utf-8", level=level)
 
 
-async def crawler(url: str) -> List[CrawlResult]:
+async def crawler(url: str, query_limits: Optional[int] = None) -> List[CrawlResult]:
     """
-    Visit https://www.mon-maire.fr/maires-regions and get all relevant links
-
-    For each link: visit them and get: ...
+    Visit url and get a list of all mayor pages for parallel processing
     """
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(limit=50, force_close=True)
+    async with aiohttp.ClientSession(connector=connector) as session:
         async with session.get(url) as resp:
             content = await resp.text()
             soup = BeautifulSoup(content, "html.parser")
@@ -42,11 +44,17 @@ async def crawler(url: str) -> List[CrawlResult]:
                 return_exceptions=True,
             )
             flattened_list = []
-            for region_listing in region_listings:
+            for idx, region_listing in enumerate(region_listings):
                 if isinstance(region_listing, Exception):
-                    logging.error(f"Failed to gather for {region_listing}")
+                    failed_url = regions[idx].a["href"]
+                    logging.error(
+                        f"Failed to gather crawlers for {failed_url}, error {region_listing}"
+                    )
                     continue
                 flattened_list.extend(region_listing)
+                if query_limits and len(flattened_list) > query_limits:
+                    break
+            logging.info(f"Found a total of {len(flattened_list)} region listings")
             return flattened_list
 
 
@@ -56,15 +64,26 @@ async def crawl_regions(
     region_name: str,
     get_pagination: bool = True,
 ):
-    resp = requests.get(url)
-    soup = BeautifulSoup(resp.content, "html.parser")
-    # if get_pagination:
-    #     child_pages = get_all_child_pages(soup)
-    #     for child in child_pages:
-    #         region_listing(child, region_name, get_pagination=False)
-    # Note: page has a listing section
+    logging.info(f"Fetching regional mayor pages for: {url}")
+    resp = await session.get(url)
+    content = await resp.text()
+    soup = BeautifulSoup(content, "html.parser")
+    result: List[CrawlResult] = []
+    if get_pagination:
+        child_pages = get_all_child_pages(soup)[0:2]
+        child_listings = await asyncio.gather(
+            *[
+                crawl_regions(session, child_uri, region_name, get_pagination=False)
+                for child_uri in child_pages
+            ],
+            return_exceptions=True,
+        )
+        for idx, child in enumerate(child_listings):
+            if isinstance(child, Exception):
+                logging.error(f"Failed to load content for {child_pages[idx]}, error: {child}")
+                continue
+            result.extend(child)
     mayors = soup.find_all("li", class_="list-group-item")
-    result = []
     for mayor in mayors:
         ville, a_tag = mayor.contents
         ville = ville.split("-")[0].strip()
@@ -95,29 +114,40 @@ def get_all_child_pages(soup):
     return child_pages
 
 
-async def extractor(crawl_results: List[CrawlResult]):
+async def extractor(
+    crawl_results: List[CrawlResult], query_limits: Optional[int] = None
+):
     """
     Handle extraction in chunks to prevent IO from bottling processing
     """
-    # FIXME: remove this
-    crawl_results = crawl_results[0:20]
-    iterator = iter(crawl_results)
-    async with aiohttp.ClientSession() as session:
-        while chunk := list(itertools.islice(iterator, 10)):
-            mayors = await asyncio.gather(*[extract_content_from_mayor_page(session, crawl) for crawl in chunk])
-            yield mayors
+    if query_limits:
+        crawl_results = crawl_results[0:query_limits]
+    connector = aiohttp.TCPConnector(limit=50, force_close=True)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        mayors = await asyncio.gather(
+            *[
+                extract_content_from_mayor_page(session, crawl)
+                for crawl in crawl_results
+            ],
+            return_exceptions=True,
+        )
+        for idx, mayor in enumerate(mayors):
+            if isinstance(mayor, Exception):
+                logging.error(f"Failed to extract mayor info from {crawl_results[idx]}, error: {mayor}")
+                continue
+            yield mayor
 
 
 async def extract_content_from_mayor_page(
     session: aiohttp.ClientSession, crawl: CrawlResult
 ) -> dict:
     # TODO: fix bugs found in this parsing script
+    logging.info(f"Extracting content for {crawl.mayor_link}")
     itemprop = lambda x: soup.find(itemprop=x).text.strip()
     async with session.get(crawl.mayor_link) as resp:
         content = await resp.text()
         soup = BeautifulSoup(content, "html.parser")
         data = {
-
             "Région": crawl.region,
             "Ville": crawl.ville,
             "Nom du maire": crawl.mayor_name,
@@ -137,24 +167,49 @@ async def extract_content_from_mayor_page(
         return data
 
 
-async def runner():
-    main_page = "https://www.mon-maire.fr/maires-regions"
-    crawl_results = await crawler(main_page)
-
-    with open("/tmp/res.csv", "w") as f:
-        field_names = ["Région", "Ville", "Nom du maire", "Date de prise de fonction", "Téléphone", "Email", "Adresse Mairie"]
+async def runner(output_file: str, query_limits: Optional[int] = None):
+    logging.info("Started processing")
+    crawl_results = await crawler(MAIRE_URL, query_limits)
+    logging.info(f"Total results to extract: {len(crawl_results)}")
+    with open(output_file, "w") as f:
+        count = 0
+        field_names = [
+            "Région",
+            "Ville",
+            "Nom du maire",
+            "Date de prise de fonction",
+            "Téléphone",
+            "Email",
+            "Adresse Mairie",
+        ]
         writer = csv.DictWriter(f, fieldnames=field_names)
         writer.writeheader()
-        async for extracted_result in extractor(crawl_results):
-            writer.writerows(extracted_result)
-    print("done")
+        async for extracted_result in extractor(crawl_results, query_limits):
+            writer.writerow(extracted_result)
+            count += 1
+    logging.info(f"Completed processing, written {count} rows")
 
 
 def main():
-    asyncio.run(runner())
-    # url = "https://www.mon-maire.fr/maire-de-anse-bertrand-971"
-    # data = extract_content_from_mayor_page(url)
-    # print(data)
+    parser = argparse.ArgumentParser("Demo application for Stratalis")
+    parser.add_argument("--output-file", required=True, help="File to store results")
+    parser.add_argument(
+        "--log-file", help="File to store logs to, if not provided, we log to stdout"
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="The log level to use, higher numbers means less logs",
+        default="DEBUG",
+    )
+    parser.add_argument(
+        "--query-limits",
+        type=int,
+        help="Limits the number of mayors to get and output to the csv",
+    )
+    args = parser.parse_args()
+    set_up_logger(args.log_level, args.log_file)
+    asyncio.run(runner(args.output_file, args.query_limits))
 
 
 if __name__ == "__main__":
