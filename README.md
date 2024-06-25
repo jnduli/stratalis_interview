@@ -15,6 +15,7 @@ I've optimized the program for IO, using asyncio python.
 cd /path/to/project/folder
 pipx install -f .
 demo --output-file /tmp/results.csv
+demo --help # for more flags
 ```
 
 or for development mode:
@@ -22,7 +23,8 @@ or for development mode:
 ```
 cd /path/to/project/folder
 python -m venv .env
-python -m pip install --editable .
+python -m pip install --editable ".[dev]"
+pytest .
 demo --output-file /tmp/results.csv
 ```
 
@@ -34,5 +36,7 @@ demo --output-file /tmp/results.csv
    different inputs. This allows extraction to happen independently of crawling.
 3. Use threads/multiprocessing to perform extraction on multiple processes since
    a huge chunk of parsing is CPU bound.
+4. Some pages don't have the full content specified e.g. [maire de beaulieu](https://www.mon-maire.fr/maire-de-beaulieu-15), so I've chosen to default to an empty string in these instances
+5. Add unit tests for the parsing logic
 
 

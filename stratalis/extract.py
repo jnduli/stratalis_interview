@@ -39,7 +39,7 @@ async def extract_content_from_mayor_page(
     session: aiohttp.ClientSession, crawl: CrawlResult
 ) -> dict:
     # TODO: fix bugs found in this parsing script
-    logging.info(f"Extracting content for {crawl.mayor_link}")
+    logging.debug(f"Extracting content for {crawl.mayor_link}")
 
     def itemprop(x):
         item = soup.find(itemprop=x)
@@ -71,4 +71,5 @@ async def extract_content_from_mayor_page(
                     str_date_take_office = date_take_office.group(1)
                 data["Date de prise de fonction"] = str_date_take_office
                 break
+        logging.debug(f"Completed extracting content for {crawl.mayor_link}")
         return data
