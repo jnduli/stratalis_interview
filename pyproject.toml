@@ -17,6 +17,7 @@ readme = "README.md"
 dependencies = [
   "aiohttp==3.9.3",
   "lxml==5.1.0",
+  "requests",
 ]
 
 [project.optional-dependencies]
