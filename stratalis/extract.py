@@ -58,6 +58,7 @@ async def extract_content_from_mayor_page(
             "Email": itemprop("email"),
             "Adresse Mairie": f"{itemprop('name')}, {itemprop('streetAddress')}, {itemprop('postalCode')} {itemprop('addressLocality')}",
         }
+        data["Date de prise de fonction"] = ""
         for paragraph in soup.find_all("p"):
             if "a pris ses fonctions en tant que maire le" in paragraph.text:
                 date_take_office = re.match(
@@ -65,11 +66,8 @@ async def extract_content_from_mayor_page(
                     paragraph.text,
                     re.DOTALL,
                 )
-                if date_take_office is None:
-                    str_date_take_office = ""
-                else:
-                    str_date_take_office = date_take_office.group(1)
-                data["Date de prise de fonction"] = str_date_take_office
+                if date_take_office:
+                    data["Date de prise de fonction"] = date_take_office.group(1)
                 break
         logging.debug(f"Completed extracting content for {crawl.mayor_link}")
         return data

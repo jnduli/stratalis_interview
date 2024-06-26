@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import csv
 import logging
+import time
 from typing import Optional
 
 from stratalis import crawl, extract
@@ -14,6 +15,7 @@ def set_up_logger(level: str, log_file: Optional[str] = None):
 
 
 async def runner(output_file: str, query_limits: Optional[int] = None):
+    start = time.monotonic()
     logging.info("Started processing")
     crawl_results = await crawl.crawler(MAIRE_URL, query_limits)
     logging.info(f"Total results to extract: {len(crawl_results)}")
@@ -33,7 +35,9 @@ async def runner(output_file: str, query_limits: Optional[int] = None):
         async for extracted_result in extract.extractor(crawl_results, query_limits):
             writer.writerow(extracted_result)
             count += 1
-    logging.info(f"Completed processing, written {count} rows")
+
+    end = time.monotonic()
+    logging.info(f"Completed processing, written {count} rows. Took {end - start} seconds.")
 
 
 def main():
