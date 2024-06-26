@@ -20,7 +20,8 @@ async def crawler(url: str, query_limits: Optional[int] = None) -> List[CrawlRes
     Visit url and get a list of all mayor pages for parallel processing
     """
     connector = aiohttp.TCPConnector(limit=50, force_close=True)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    timeout = aiohttp.ClientTimeout(total=50)
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         async with session.get(url) as resp:
             content = await resp.text()
             soup = BeautifulSoup(content, "html.parser")

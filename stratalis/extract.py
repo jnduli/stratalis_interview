@@ -17,8 +17,10 @@ async def extractor(
     """
     if query_limits:
         crawl_results = crawl_results[0:query_limits]
+    logging.info(f"Start extracting results for {len(crawl_results)} pages")
     connector = aiohttp.TCPConnector(limit=50, force_close=True)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    timeout = aiohttp.ClientTimeout(total=50)
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         mayors = await asyncio.gather(
             *[
                 extract_content_from_mayor_page(session, crawl)
@@ -29,7 +31,7 @@ async def extractor(
         for idx, mayor in enumerate(mayors):
             if isinstance(mayor, Exception):
                 logging.error(
-                    f"Failed to extract mayor info from {crawl_results[idx]}, error: {mayor}"
+                    f"Failed to extract mayor info from {crawl_results[idx]}, errorType: {type(mayor)}, error: {mayor}"
                 )
                 continue
             yield mayor

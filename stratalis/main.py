@@ -3,11 +3,18 @@ import asyncio
 import csv
 import logging
 import time
-from typing import Optional
+from typing import Optional, List
+from itertools import islice
+
 
 from stratalis import crawl, extract
 
 MAIRE_URL = "https://www.mon-maire.fr/maires-regions"
+
+def chunker(it: List[crawl.CrawlResult], size: int):
+    iterator = iter(it)
+    while chunk := list(islice(iterator, size)):
+        yield chunk
 
 
 def set_up_logger(level: str, log_file: Optional[str] = None):
@@ -32,9 +39,10 @@ async def runner(output_file: str, query_limits: Optional[int] = None):
         ]
         writer = csv.DictWriter(f, fieldnames=field_names)
         writer.writeheader()
-        async for extracted_result in extract.extractor(crawl_results, query_limits):
-            writer.writerow(extracted_result)
-            count += 1
+        for crawl_results_chunk in chunker(crawl_results, 500):
+            async for extracted_result in extract.extractor(crawl_results_chunk, query_limits):
+                writer.writerow(extracted_result)
+                count += 1
 
     end = time.monotonic()
     logging.info(f"Completed processing, written {count} rows. Took {end - start} seconds.")
